@@ -1,0 +1,1423 @@
+---
+title: "nifH_irr_dry_analysis"
+author: "Alexander Alleman"
+date: "March 18, 2019"
+output:
+  pdf_document:
+    df_print: kable
+  word_document: default
+  html_document: default
+---
+
+```{r echo=FALSE}
+gsub("[[:punct:][:space:]]", "-", Sys.time())
+```
+
+
+```{r echo=FALSE}
+getwd()
+```
+
+```{r}
+set.seed(8765)
+```
+
+###Load packages
+```{r warning=FALSE,message=FALSE}
+library(ggplot2)
+library(data.table)
+library(vegan)
+library(dplyr)
+library(scales)
+library(grid)
+library(reshape2)
+library(ggpubr)
+library(RColorBrewer)
+library(ape)
+library(grid)
+library(knitr)
+library(ggrepel)
+library(igraph)
+library(Hmisc)
+library(Matrix)
+library(ggnetwork)
+library(intergraph)
+library(parallel)
+library(tinytex)
+library(phyloseq)
+```
+
+```{r echo=FALSE}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=100),tidy=TRUE)
+```
+
+####Colors
+```{r}
+farm_col<-(c("#8c510a", "#d8b365", "#f6e8c3", "#f5f5f5", "#c7eae5", "#5ab4ac", "#01665e"))
+farm_col_dark<-brewer.pal(7, "Dark2")
+farm_col_paired<-brewer.pal(10, "Paired")
+```
+
+***
+##Load OTU, Taxa, and Meta data
+
+####Add OTU table with sample names on top and OTU names as row names 
+```{r}
+OTU_nifH<- read.delim(
+  "~/Alex Alleman/Statewide Microbiome Analysis/Statewide analysis/nifH_OTUallspring.csv",
+  row.names = 1)
+head(OTU_nifH)[,1:10]
+```
+
+
+
+####These taxa were also created by Mr. DNA through a blast program and the NCBI database
+```{r}
+tax_nifH<- read.delim(
+  "~/Alex Alleman/Statewide Microbiome Analysis/Statewide analysis/nifH_OTU_ids_2016_fixed1.txt", 
+  row.names = 1)
+head(tax_nifH)[,1:8]
+```
+
+####Meta data set has be placed together from all the spring and summer data with excel
+```{r}
+meta_irr<- read.delim("~/Alex Alleman/Statewide Microbiome Analysis/Statewide analysis/all_metadata_summer_irr_sub.csv", row.names = 1, na.strings = "NA", sep = ",",
+                  colClasses = c(rep('factor', 7), rep('numeric', 3), rep('factor', 4), 'numeric',
+                                 rep('factor', 3), rep('numeric', 28) ) )
+head(meta_irr)[,1:5]
+```
+
+
+
+
+
+#### Convert to matrix 
+
+```{r}
+OTU_nifH_m<-as.matrix(OTU_nifH)
+tax_nifH_m<-as.matrix(tax_nifH)
+meta_m<-as.matrix(meta_irr)
+
+class(OTU_nifH_m)
+class(tax_nifH_m)
+class(meta_m)
+
+```
+
+```{r}
+OTUnifH = otu_table(OTU_nifH_m, taxa_are_rows = TRUE)
+TAXnifH = tax_table(tax_nifH_m)
+
+physeq_nifH = phyloseq(OTUnifH, TAXnifH)
+```
+
+
+####Get physeq info
+```{r}
+physeq_nifH
+```
+
+###Add meta data to both phyoseq 
+
+```{r}
+meta_phy_irr <- sample_data(meta_irr)
+sample_names(meta_phy_irr)
+```
+
+```{r}
+physeq_nifH_irr<-merge_phyloseq(physeq_nifH, meta_phy_irr)
+physeq_nifH_irr
+```
+
+
+####Rarefiy data
+```{r}
+physeq_nifH_irr<-rarefy_even_depth(physeq_nifH_irr)
+physeq_nifH_irr
+```
+
+
+***
+
+
+
+
+
+
+
+***
+##Trimming
+####Remove less than triplets in data  and prevlant in 20% of the sample
+
+
+```{r}
+physeq_nifH_irr_trim = filter_taxa(physeq_nifH_irr, function(x) sum(x > 3) > (0.2*length(x)), TRUE)
+physeq_nifH_irr_trim
+```
+#### We have removed the majorty of the low abundance data with a remaining 3596 taxa which make the data analysis much more managable.
+
+***
+#Analysis
+
+***
+##Alpha Analysis
+###Bar plots 
+
+####Batch all phylum that do not have more than 5% abundance in the total abundance and group together and call "<5% abundance"
+```{r}
+physeq_nifH_irr_ord = transform_sample_counts(physeq_nifH_irr_trim, function(x) x / sum(x) )
+physeq_nifH_irr_ord_phylum <- tax_glom(physeq_nifH_irr_ord, "phylum")
+data_nifH_irr_phylum <- psmelt(physeq_nifH_irr_ord_phylum)
+data_nifH_irr_phylum$phylum<-as.character(data_nifH_irr_phylum$phylum)
+data_nifH_irr_phylum$phylum[data_nifH_irr_phylum$Abundance<0.05]<-"<5% abdund"
+count <- length(unique(data_nifH_irr_phylum$phylum))
+count
+unique(data_nifH_irr_phylum$phylum)
+```
+#### We have 9 Phylum that are more the 5% of the total abundance in all samples this simplifies the plot to a readable format
+
+```{r}
+ggplot(data = data_nifH_irr_phylum, aes(x = Site, y = Abundance, fill = phylum))+
+geom_bar(aes(fill = phylum), stat = "identity",  position = "stack", show.legend = TRUE)+
+scale_fill_manual(name = "Phylum", 
+                   values=c('#a6cee3','#1f78b4','#b2df8a','#33a02c'),
+                   breaks = c("p__firmicutes", "p__proteobacteria", "p__actinobacteria", "<5% abdund"),
+                   labels = c( "Firmicutes", "Proteobacteria", "Actinobacteria", "<5% abdund"),
+              guide = guide_legend(reverse = FALSE)
+               )+
+ggtitle("nifH Phylum Relative Abundance by Site")+
+ylab("Relative Abundance")+
+xlab(" ")+
+scale_x_discrete(labels = c( "Huntley Dryland", "Huntley Irrigated", "Sidney Dryland", "Sidney Irrigated"))+
+theme(axis.text.x = element_text(angle = 90, hjust = 1), axis.text.y = element_blank(), panel.background = element_blank())
+```
+
+
+
+Publish figure as a tiff
+```{r}
+tiff("nifH_barplot_sid_hunt.tiff", width = 6, height = 4, units = 'in', res = 600)
+ggplot(data = data_nifH_irr_phylum, aes(x = Site, y = Abundance, fill = phylum))+
+geom_bar(aes(fill = phylum), stat = "identity",  position = "stack", show.legend = TRUE)+
+scale_fill_manual(name = "Phylum", 
+                   values=c('#a6cee3','#1f78b4','#b2df8a','#33a02c'),
+                   breaks = c("p__firmicutes", "p__proteobacteria", "p__actinobacteria", "<5% abdund"),
+                   labels = c( "Firmicutes", "Proteobacteria", "Actinobacteria", "<5% abdund"),
+              guide = guide_legend(reverse = FALSE)
+               )+
+ggtitle("nifH Phylum Relative Abundance by Site")+
+ylab("Relative Abundance")+
+xlab(" ")+
+scale_x_discrete(labels = c( "Huntley Dryland", "Huntley Irrigated", "Sidney Dryland", "Sidney Irrigated"))+
+theme(axis.text.x = element_text(angle = 90, hjust = 1), axis.text.y = element_blank(), panel.background = element_blank())
+dev.off()
+```
+
+
+###nifH genus barplot
+
+```{r}
+
+physeq_nifH_ord_irr_genus <- tax_glom(physeq_nifH_irr_ord, "genus")
+data_nifH__irr_genus <- psmelt(physeq_nifH_ord_irr_genus)
+data_nifH__irr_genus$genus<-as.character(data_nifH__irr_genus$genus)
+data_nifH__irr_genus$genus[data_nifH__irr_genus$Abundance<0.1]<-"<10% abdund"
+unique(data_nifH__irr_genus$genus)
+```
+
+```{r}
+ggplot(data = data_nifH__irr_genus, aes(x = Site, y = Abundance, fill = genus))+
+geom_bar(aes(fill = genus), stat = "identity", position = "stack", show.legend = TRUE)+
+scale_fill_manual(name = "Genus", 
+                  values=c('#a6cee3','#1f78b4','#b2df8a','#33a02c',
+                           '#fb9a99','#e31a1c','#fdbf6f','#ff7f00',
+                           '#cab2d6','#6a3d9a','#ffff99','#b15928'),
+                  breaks=c("g__paenibacillus", "g__geobacter", "g__rhizobium",
+                           "g__rhodopseudomonas", "g__bradyrhizobium","g__dechloromonas",
+                           "g__agrobacterium", "g__gluconacetobacter","g__arthrobacter",  "<10% abdund" ),
+                  labels=c("Paenibacillus", "Geobacter", "Rhizobium",
+                           "Rhodopseudomonas", "Bradyrhizobium","Dechloromonas",
+                           "Agrobacterium", "Gluconacetobacter","Arthrobacter",  "<10% abundance"),
+                  guide = guide_legend(reverse = FALSE)
+                    )+
+ggtitle("nifH Genus Relative Abundance by Site")+
+ylab("Relative Abundance")+
+scale_x_discrete(labels = c( "Huntley Dryland", 
+                            "Huntley Irrigated", 
+                            "Sidney Dryland", "Sidney Irrigated"))+
+theme(axis.text.x = element_text(angle = 90, hjust = 1), axis.text.y = element_blank(),
+      panel.background = element_blank())
+```
+
+####Publish to a tiff image
+```{r echo=FALSE}
+tiff("nifH_genus_irr_barplot.tiff", width = 6, height = 4, units = 'in', res = 600)
+ggplot(data = data_nifH__irr_genus, aes(x = Site, y = Abundance, fill = genus))+
+geom_bar(aes(fill = genus), stat = "identity", position = "stack", show.legend = TRUE)+
+scale_fill_manual(name = "Genus", 
+                  values=c('#a6cee3','#1f78b4','#b2df8a','#33a02c',
+                           '#fb9a99','#e31a1c','#fdbf6f','#ff7f00',
+                           '#cab2d6','#6a3d9a','#ffff99','#b15928'),
+                  breaks=c("g__paenibacillus", "g__geobacter", "g__rhizobium",
+                           "g__rhodopseudomonas", "g__bradyrhizobium","g__dechloromonas",
+                           "g__agrobacterium", "g__gluconacetobacter","g__arthrobacter",  "<10% abdund" ),
+                  labels=c("Paenibacillus", "Geobacter", "Rhizobium",
+                           "Rhodopseudomonas", "Bradyrhizobium","Dechloromonas",
+                           "Agrobacterium", "Gluconacetobacter","Arthrobacter",  "<10% abundance"),
+                  guide = guide_legend(reverse = FALSE)
+                    )+
+ggtitle("nifH Genus Relative Abundance by Site")+
+ylab("Relative Abundance")+
+scale_x_discrete(labels = c( "Huntley Dryland", 
+                            "Huntley Irrigated", 
+                            "Sidney Dryland", "Sidney Irrigated"))+
+theme(axis.text.x = element_text(angle = 90, hjust = 1), axis.text.y = element_blank(),
+      panel.background = element_blank())
+dev.off()
+```
+
+
+
+
+##Alpha diversity metrics 
+####Use phyloseq internal packages to calculate the alpha diversity 
+```{r}
+plot_richness(physeq_nifH_irr_trim)
+```
+
+
+####Simplify to just observed and Chao1 and Shannon
+
+```{r}
+plot_richness(physeq_nifH_irr_trim, measures = c("Observed","Chao1", "Shannon"), color = "Site")
+```
+
+####Make a table of the alpha and write table to folder
+```{r echo=FALSE}
+rich_irr_nifH<-estimate_richness(physeq_nifH_irr_trim, split = TRUE)
+write.table(rich_irr_nifH, file = "alpha_nifH_irr.text", sep = "\t")
+head(rich_irr_nifH)
+```
+
+
+
+
+####Just make a shannon table for further analysis
+```{r}
+statewide_nifH_irr_shannon<-estimate_richness(physeq_nifH_irr_trim, split = TRUE, measures = "Shannon")
+
+write.table(statewide_nifH_irr_shannon, file = "statewide_nifH_irr_shannon.text", sep = "\t")
+
+head(statewide_nifH_irr_shannon)
+```
+####Plot Shannon diversity boxplot using ggpubr 
+
+
+#### We see there is a signficant diffrence between sites using the Kruskal-Wallis test. From the above graph we see the plots look like normal distrubution with shannon but lets check if the data is normal in all alpha metrics. 
+
+####Used the following protocol 
+https://rpubs.com/dillmcfarlan/R_microbiotaSOP
+```{r}
+#Create 2x3 plot environment so that we can see all 6 metrics at once. 
+par(mfrow = c(2, 3))
+
+#Then plot each metric.
+hist(rich_irr_nifH$Observed, main="Observed OTUs", xlab="", breaks=10)
+hist(rich_irr_nifH$Shannon, main="Shannon diversity", xlab="", breaks=10)
+hist(rich_irr_nifH$Simpson, main="Simpson diversity", xlab="", breaks=10)
+hist(rich_irr_nifH$Chao1, main="Chao richness", xlab="", breaks=15)
+hist(rich_irr_nifH$ACE, main="ACE richness", xlab="", breaks=15)
+hist(rich_irr_nifH$InvSimpson, main="Inverse Simpson", xlab="", breaks=15)
+```
+####Test for normalcy using the shapiro test. The null hypothesis for this test is that the data are normally distributed, if the p-value is greater than 0.05, then the null hypothesis is not rejected.
+```{r}
+shapiro.test(rich_irr_nifH$Observed)
+shapiro.test(rich_irr_nifH$Shannon)
+shapiro.test(rich_irr_nifH$InvSimpson)
+shapiro.test(rich_irr_nifH$Chao1)
+shapiro.test(rich_irr_nifH$ACE)
+shapiro.test(rich_irr_nifH$InvSimpson)
+```
+
+####All noraml from shapiro test we can use anova for variance diffrence 
+
+#### Merege the meta data with the richness data and add back to the phyloseq data
+```{r}
+#First merge data sets with meta2 
+meta_irr$sample_names<-rownames(meta_irr)
+rich_irr_nifH$sample_names<-rownames(rich_irr_nifH)
+meta_irr_nifH<-merge(meta_irr, rich_irr_nifH, by = "sample_names")
+rownames(meta_irr_nifH)<-meta_irr_nifH$sample_names
+meta_irr_nifH<-meta_irr_nifH[,-1]
+head(meta_irr_nifH)
+```
+```{r}
+mean(meta_irr_nifH$Observed)
+```
+
+####Make multiple grid plot with observed, shannon simpson and chao1 diveristy 
+```{r}
+
+
+#use ggpubr for plot 
+nifH_irr_Observ<-ggboxplot(meta_irr_nifH, x = "Site", y = "Observed",
+   rug = TRUE,
+   fill = "Site", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+  
+nifH_irr_Shannon<-ggboxplot(meta_irr_nifH, x = "Site", y = "Shannon",
+   rug = TRUE,
+   fill = "Site", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+  
+nifH_irr_Chao<- ggboxplot(meta_irr_nifH, x = "Site", y = "Chao1",
+    rug = TRUE,
+   fill = "Site", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+
+nifH_irr_InvSim<- ggboxplot(meta_irr_nifH, x = "Site", y = "InvSimpson",
+   rug = TRUE,
+   fill = "Site", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+
+alpha_nifH_fig<-ggarrange(nifH_irr_Observ, nifH_irr_Shannon, nifH_irr_Chao, nifH_irr_InvSim, ncol = 2, nrow = 2, common.legend = TRUE, legend = "bottom")
+
+annotate_figure(alpha_nifH_fig, top = text_grob("Alpha Diversity of nifH for Huntley and Sidney", size = 20))   
+```
+```{r}
+nifH_irr_Observ<-ggboxplot(meta_irr_nifH, x = "Site", y = "Observed",
+   rug = TRUE,
+   fill = "Site", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")+
+  stat_compare_means(comparisons = list( c("Sidney Dryland", "Sidney Irrigated")))
+nifH_irr_Observ
+```
+meta_irr
+
+```{r}
+nifH_irr_precip<-ggboxplot(meta_irr_nifH, x = "Site", y = "season_precip",
+   rug = TRUE,
+   fill = "Site", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")+
+  stat_compare_means(comparisons = list( c("Sidney Dryland", "Sidney Irrigated")))
+nifH_irr_Observ
+```
+
+```{r}
+nifH_irr_Observ_stats<-ggplot_build(nifH_irr_Observ)
+nifH_irr_Observ_stats$data
+```
+
+```{r}
+nifH_irr_shannon_stats<-ggplot_build(nifH_irr_Shannon)
+nifH_irr_shannon_stats$data
+```
+Save to .tiff
+```{r echo=FALSE}
+tiff("aDiv_irr_nifH.tiff", width = 8, height = 4.5, units = 'in', res = 600)
+
+alpha_nifH_fig<-ggarrange(nifH_irr_Observ, nifH_irr_Shannon, nifH_irr_Chao, nifH_irr_InvSim, ncol = 2, nrow = 2, common.legend = TRUE, legend = "bottom")
+
+annotate_figure(alpha_nifH_fig, top = text_grob("Alpha Diversity of nifH for Huntley and Sidney", size = 20)) 
+dev.off()
+
+```
+####Explination of alpha diversity metrics:
+***Observed***- total observed OTUs
+***Chao1***- estimate diversity and	assumes	that	the	number	of	observations	for	a	taxa	has	a	Poisson
+distribution	and	corrects	for	variance
+***Shannon***- # of OTUs (richness) scaled to the evenness 
+***Simpson***- scale of dominace probabilty of any two indviduals drawn at random beloging to the same species 
+
+####Use ANOVA on alpha diversity metrics for main variables
+
+####Shannon first 
+```{r}
+aov_shannon_site_nifH <- aov(Shannon ~ Site, meta_irr_nifH)
+summary(aov_shannon_site_nifH)
+```
+Correct for multiple comparisons
+```{r}
+shannon_nifH_site<- TukeyHSD(aov_shannon_site_nifH, "Site", ordered = TRUE)
+shannon_nifH_site
+```
+
+
+
+####irrigation 
+
+```{r}
+aov_shannon_irr_nifH <- aov(Shannon ~ Plot, meta_irr_nifH)
+summary(aov_shannon_irr_nifH)
+```
+####irrgation is not sigficant driver of alpha diversity 
+####Plot Irrigation 
+
+```{r}
+
+
+#use ggpubr for plot 
+nifH_Observ_irr<-ggboxplot(meta_irr_nifH, x = "Plot", y = "Observed",
+   rug = TRUE,
+   fill = "Plot", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+  
+nifH_Shannon_irr<-ggboxplot(meta_irr_nifH, x = "Plot", y = "Shannon",
+   rug = TRUE,
+   fill = "Plot", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+  
+nifH_Chao_irr<- ggboxplot(meta_irr_nifH, x = "Plot", y = "Chao1",
+    rug = TRUE,
+   fill = "Plot", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+
+nifH_InvSim_irr<- ggboxplot(meta_irr_nifH, x = "Plot", y = "Simpson",
+   rug = TRUE,
+   fill = "Plot", xlab = " ",
+   palette = farm_col_paired)+
+  rremove("x.text")
+
+alpha_nifH_irr_fig<-ggarrange(nifH_Observ_irr, nifH_Shannon_irr, nifH_Chao_irr, nifH_InvSim_irr, ncol = 2, nrow = 2, common.legend = TRUE, legend = "bottom")
+
+annotate_figure(alpha_nifH_irr_fig, top = text_grob("Alpha Diversity of nifH by Irrgation", size = 20))   
+```
+```{r}
+tiff("aDiv_irr_plot_nifH.tiff", width = 8, height = 4.5, units = 'in', res = 600)
+
+
+alpha_nifH_irr_fig<-ggarrange(nifH_Observ_irr, nifH_Shannon_irr, nifH_Chao_irr, nifH_InvSim_irr, ncol = 2, nrow = 2, common.legend = TRUE, legend = "bottom")
+
+annotate_figure(alpha_nifH_irr_fig, top = text_grob("Alpha Diversity of nifH by Irrigation", size = 20))   
+
+dev.off()
+```
+
+
+
+
+####Looks like there is significance in the other diverisities to for irrgation (Dryland vs irrigated)
+```{r}
+aov_observed_nifH_irr <- aov(Observed ~ Plot, meta_irr_nifH)
+summary(aov_observed_nifH_irr)
+```
+
+```{r}
+aov_shannon_nifH_irr <- aov(Shannon ~ Plot, meta_irr_nifH)
+summary(aov_shannon_nifH_irr)
+```
+```{r}
+aov_shannon_irr_nifH_site <- aov(Shannon ~  Plot+ARC, meta_irr_nifH)
+summary(aov_shannon_irr_nifH_site)
+```
+
+
+
+
+```{r}
+aov_shannon_irr_nifH_site <- aov(Shannon ~  Plot * ARC, meta_irr_nifH)
+summary(aov_shannon_irr_nifH_site)
+```
+```{r}
+plot(aov_shannon_irr_nifH_site, 2)
+```
+
+```{r}
+plot(aov_shannon_irr_nifH_site, 3)
+```
+
+```{r}
+plot(aov_shannon_irr_nifH_site, 4)
+```
+
+```{r}
+aov_shannon_irr_nifH_site <- aov(Shannon ~  Plot / ARC, meta_irr_nifH)
+summary(aov_shannon_irr_nifH_site)
+```
+
+
+
+
+```{r}
+aov_Chao1_nifH_irr <- aov(Chao1 ~ Plot, meta_irr_nifH)
+summary(aov_Chao1_nifH_irr)
+```
+
+
+```{r}
+aov_Simpson_nifH_irr <- aov(Simpson ~ Plot, meta_irr_nifH)
+summary(aov_Simpson_nifH_irr)
+```
+```{r}
+aov_Simpson_nifH_irr_site <- aov(Simpson ~ Plot/Site, meta_irr_nifH)
+summary(aov_Simpson_nifH_irr_site)
+```
+
+
+***
+
+#Plot ordination 
+####To simplfy ordination and save time we will trim the OTUs more 
+####Remove OTUs that do not show appear more than 5 times in more than 10th of the samples
+https://joey711.github.io/phyloseq/plot_ordination-examples.html
+
+
+```{r}
+wh0 = genefilter_sample(physeq_nifH_irr_trim, 
+                        filterfun_sample(function(x) x > 5),
+                        A=0.1*nsamples(physeq_nifH_irr_trim))
+physeq_nifH_irr_ord = prune_taxa(wh0, physeq_nifH_irr_trim)
+physeq_nifH_irr_ord
+```
+Transform to even sampling depth
+```{r}
+physeq_nifH_irr_ord = transform_sample_counts(physeq_nifH_irr_ord, function(x) 1E6 * x/sum(x))
+physeq_nifH_irr_ord
+```
+##DCA Ordination 
+```{r}
+physeq_nifH_irr_DCA<- ordinate(physeq_nifH_irr_ord, "DCA", "bray")
+plot_ordination(physeq_nifH_irr_ord, physeq_nifH_irr_DCA, color = "Site", shape = "Plot")+
+  geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH DCA Ordination by Site and Irrigation")+
+  theme_bw()
+
+```
+
+
+```{r}
+tiff("nifHDCA_IRR.tiff", width = 6, height = 4, units = 'in', res = 600)
+plot_ordination(physeq_nifH_irr_ord, physeq_nifH_irr_DCA, color = "Site", shape = "Plot")+
+  geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH DCA Ordination by Site and Irrigation")+
+  theme_bw()
+
+dev.off()
+```
+
+
+####Pea variety has no correlation or ordnaiton to bacterial community bray-curtis distance
+```{r}
+plot_ordination(physeq_nifH_irr_ord, physeq_nifH_irr_DCA, color = "Pea_variety")+
+    geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH DCA Ordination by Pea Variety")+
+  theme_bw()
+
+```
+
+
+
+
+```{r}
+phynifH_ord_irr_PCoA<- ordinate(physeq_nifH_irr_ord, "PCoA", "bray")
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_irr_PCoA, color = "Site", shape = "Plot")+
+  geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH PCoA Ordination by Site and Irrigation")+
+  theme_bw()
+
+```
+```{r}
+tiff("nifHPCoA_IRR.tiff", width = 6, height = 4, units = 'in', res = 600)
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_irr_PCoA, color = "Site", shape = "Plot")+
+  geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH PCoA Ordination by Site and Irrigation")+
+  theme_bw()
+
+dev.off()
+```
+
+```{r}
+phynifH_ord_CCA<- ordinate(physeq_nifH_irr_ord, "CCA", "bray")
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_CCA, color = "Site", shape = "Plot")+
+    geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH CCA Ordination by Site and Irrigation")+
+  theme_bw()
+
+```
+
+
+```{r}
+phynifH_ord_CAP<- ordinate(physeq_nifH_irr_ord, "RDA", "bray")
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_CAP, color = "Site", shape = "Plot")+
+    geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH CAP Ordination by Site and Irrigation")+
+  theme_bw()
+
+```
+####CDA is good but we can also look in nonmetric multidimensional scaling
+
+***Contrast between DCA and NMDS***
+
+>DCA and NMDS are the two most popular methods for indirect gradient analysis. The reason they have remained side-by-side for so long is because, in part, they have different strengths and weaknesses...  Some of the issues are relatively minor: for example, computation time is rarely an important consideration, except for the hugest data sets. Some issues are not entirely resolved: the degree to which noise affects NMDS, and the degree to which NMDS finds local rather than global options still need to be determined ... Since NMDS is a distance-based method, all information about species identities is hidden once the distance matrix is created. For many, this is the biggest disadvantage of NMDS... perhaps the biggest difference between the two methods: DCA is based on an underlying model of species distributions, the unimodal model, while NMDS is not. Thus, DCA is closer to a theory of community ecology. However, NMDS may be a method of choice if species composition is determined by factors other than position along a gradient: For example, the species present on islands may have more to do with vicariance biogeography and chance extinction events than with environmental preferences – and for such a system, NMDS would be a better a priori choice. As De’ath (1999) points out, there are two classes of ordination methods - ‘species composition restoration’ (e.g. NMDS) and ‘gradient analysis’ (e.g. DCA). The choice between the methods should ultimately be governed by this philosophical distinction. - http://ordination.okstate.edu/overview.htm#Principal_Components_Analysis
+
+
+####NMDS might be a better choice since we have non gradient determining facotrs site and farm managment effecting the bacteria community 
+
+
+##NMDS Ordination 
+```{r}
+phynifH_ord_NMDS <- ordinate(physeq_nifH_irr_ord, "NMDS", "bray")
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_NMDS)
+
+```
+
+
+
+
+
+####Data has good ordination with NMDS must see stress to make sure the algorithum didnt force fit any ordination.
+
+```{r}
+phynifH_ord_NMDS
+```
+
+####Stress is really low NMDS ordinate too much.
+
+
+####Plot NMDS with Site and Irrigation 
+```{r}
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_NMDS, shape = "Plot", color = "Site")+
+  geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH NMDS Ordination by Irrigation Method")+
+  theme_bw()
+```
+
+
+```{r}
+tiff("nifH_NMDS_IRR.tiff", width = 6, height = 4, units = 'in', res = 600)
+plot_ordination(physeq_nifH_irr_ord, phynifH_ord_NMDS, shape = "Plot", color = "Site")+
+  geom_point(size = 3)+
+  scale_color_manual(values =  farm_col_paired)+
+  ggtitle("nifH NMDS Ordination by Irrigation Method")+
+  theme_bw()
+dev.off()
+```
+
+
+
+
+##Beta dispersions 
+####Test the diffrences in group homogeneities. Do our farm managment factors effect the homogeneitiey of the bray curtis distance? 
+
+####If a group (Site) in the MDS space are close but have diffrenent dispersion you could have a signifcant results when it is only a diffrence in dispersion.  
+
+
+Anderson (2006)-https://www.ncbi.nlm.nih.gov/pubmed/16542252
+
+https://onlinelibrary.wiley.com/doi/epdf/10.1111/j.1461-0248.2006.00926.x
+
+####Irrigation beta dispersion
+```{r}
+disp_nifH_plot <- betadisper(distance(physeq_nifH_irr_ord, method = "bray"), meta_irr$Plot)
+permutest(disp_nifH_plot, pairwise=TRUE, permutations=1000)
+```
+```{r}
+boxplot(disp_nifH_plot)
+```
+```{r}
+plot(disp_nifH_plot, hull = FALSE, ellipse = TRUE)
+```
+
+
+
+
+
+
+```{r}
+disp_nifH_irr_site <- betadisper(distance(physeq_nifH_irr_ord, method = "bray"), meta_irr_nifH$Site)
+permutest(disp_nifH_irr_site, pairwise=TRUE, permutations=1000)
+```
+```{r}
+boxplot(disp_nifH_irr_site)
+```
+```{r}
+TukeyHSD(disp_nifH_irr_site)
+```
+
+```{r}
+dispersion_nifH_site<-data.frame(Distance_to_centroid=disp_nifH_irr_site$distances, 
+                                Site=disp_nifH_irr_site$group)
+ggboxplot(dispersion_nifH_site, x = "Site", y = "Distance_to_centroid",
+   rug = TRUE, fill = "Site", ylab = "Distance to Centroid", 
+   xlab = " ", title = "Beta Dispersion of nifH Bray-Curtis",
+   palette = farm_col_paired)+
+  theme_bw()+
+  theme( panel.grid.major.x = element_blank())+
+  rotate_x_text()
+```
+
+```{r echo=FALSE}
+tiff("nifH_irr_dispersion_site.tiff", width = 6, height = 4, units = 'in', res = 600)
+ggboxplot(dispersion_nifH_site, x = "Site", y = "Distance_to_centroid",
+   rug = TRUE, fill = "Site", ylab = "Distance to Centroid", 
+   xlab = " ", title = "Beta Dispersion of nifH Bray-Curtis",
+   palette = farm_col_paired)+
+  theme_bw()+
+  theme( panel.grid.major.x = element_blank())+
+  rotate_x_text()
+dev.off()
+```
+
+
+***
+
+##PERMANOVA (adoins)
+
+####To test if any of the farm amanagment factors are statitically significant will use adonis from vegan to peform a PERMANOVA on the bray curtis distance. This will be able to tell the nestedness of the site and farm management. 
+
+####First try univariate fram managment 
+```{r}
+adonis(distance(physeq_nifH_irr_ord, method = "bray") ~Plot, data = meta_irr, permutations = 1000)
+```
+
+```{r}
+adonis(distance(physeq_nifH_irr_ord, method = "bray") ~Plot*Site, data = meta_irr, permutations = 1000)
+```
+
+***
+#Model Selection
+
+***
+
+##ENVFIT
+
+####Envfit does not like single variable values so we remove them 
+```{r}
+meta3<-meta_irr_nifH[,-c(3,4,10,11,27,29,35,38,42,46)]
+```
+
+####Will remove Site category like elevation, lat, long etc that do not differentiate between site we can call these all geographical factors as they do not change between sites. 
+```{r}
+meta3<-meta3[,-c(2,11:13)]
+```
+
+####Model fitting will be biased by chemical outliers that are in some plots the best way to avoid this is to determine the outliers (See chemical_analysis.Rmd) and remove the whole variable since functions ENVFIT and BIOENV will remove it if there are any n/a values. 
+
+####Removing Sulfate_Sulfur, Boron, Molybdenum, Potassium, Vanadium, Chromium and Sodium
+```{r}
+meta3<-meta3[,-c(16,18,21,29,31)]
+```
+
+```{r}
+envfit_nifH_irr <- envfit(physeq_nifH_irr_DCA , meta3, na.rm = TRUE, permu= 10000) 
+envfit_nifH_irr
+```
+####The envfit function allows us to see the correlation of our envriomental vectors to the bray-curtis species dissmilarity matrix in NMDS space. This is a loose corelation to real linear corelation but it can tell us how the NMDS orinetaion is being driven. 
+
+write to table
+
+```{r echo=FALSE}
+envfit_nifH_irr <- data.frame((envfit_nifH_irr$vectors)$arrows, (envfit_nifH_irr$vectors)$r, (envfit_nifH_irr$vectors)$pvals )
+write.table(envfit_nifH_irr, file = "envfit_nifH_irr.txt", sep = "\t", quote = FALSE, row.names = T)
+```
+
+
+####Try a quick plot with base r and vegan for the vectors 
+
+```{r}
+plot(physeq_nifH_irr_DCA, display = "sites")
+plot(envfit_nifH_irr, p.max = 0.001 )
+```
+
+***
+
+
+```{r}
+OTU_nifH_trim<- as(otu_table(physeq_nifH_irr_ord ), "matrix")
+```
+
+
+
+```{r}
+#Transpose the data to have sample names on rows
+abund_table_irr_nifH<-t(OTU_nifH_trim)
+
+nrow(abund_table_irr_nifH)
+```
+
+
+
+```{r}
+setdiff(rownames(meta3), rownames(abund_table_irr_nifH))
+```
+Our meta data and sample data match with 0 diffrence in rownames
+
+
+####will use parallel processing to speed up calculations 
+
+```{r}
+#First detect amount of cores avalible 
+detectCores()
+```
+
+```{r}
+#get bray-curtis distance
+abund_dist_nifH_irr<-vegdist(abund_table_irr_nifH, method = "bray")
+```
+
+####Remove site from meta table
+```{r}
+meta4<-meta3[,-c(1)]
+```
+
+
+***
+
+##CCA/ordistep model selection
+
+####CCA model selection uses a procedure to take the a constrained distance ordination with the complete model and compare it with a unconstrainted model. The model starts with no variables then adds variables that make the best model. These models can then be plotted against the smae ordination space as vectors.
+
+####Ordistep use Akaike information criterion (AIC) which is a estimator of relative quality of the models. AIC is relative to models you are comparing when you compare two models the one with the lower AIC is favored.  
+
+
+```{r}
+m1_irr_nifH <- cca(abund_table_irr_nifH ~ ., meta3)
+m0_irr_nifH <- cca(abund_table_irr_nifH ~ 1, meta3)
+m1_irr_nifH
+m0_irr_nifH
+```
+
+
+####Ordistep
+
+```{r results="hide"}
+model_irr_nifH <-ordistep(m0_irr_nifH, scope=formula(m1_irr_nifH))
+```
+
+```{r}
+model_irr_nifH$anova
+```
+
+####Site is again nesting the data in the model selection
+
+
+####CCA without site
+```{r}
+m1_table_irr_nifH_site_na <- cca(abund_table_irr_nifH ~ ., meta4)
+m0_table_irr_nifH_site_na <- cca(abund_table_irr_nifH ~ 1, meta4)
+m1_table_irr_nifH_site_na
+m0_table_irr_nifH_site_na
+```
+
+####Ordistep
+
+```{r results="hide"}
+model_table_irr_nifH_site_na<-ordistep(m0_table_irr_nifH_site_na, scope=formula(m1_table_irr_nifH_site_na))
+```
+
+```{r}
+model_table_irr_nifH_site_na$anova
+```
+
+
+
+
+
+####Constrained Ordination plot in ggplot 
+http://deneflab.github.io/MicrobeMiseq/demos/mothur_2_phyloseq.html#constrained_ordinations
+
+
+
+
+
+
+
+
+###CAP model building
+####canonical analysis of principal coordinates (CAP) is similar to RDA but allows for non-euclidian dissimilarity like Bray-Curtis which we have been using. 
+
+https://esajournals.onlinelibrary.wiley.com/doi/epdf/10.1890/0012-9658%282003%29084%5B0511%3ACAOPCA%5D2.0.CO%3B2
+
+###Guide for the CAP Ordination 
+
+####https://quantpalaeo.wordpress.com/2014/04/14/variance-inflation-factors-and-ordination-model-selection/
+
+####If the VIF of a predictor is high, it indicates that that predictor is highly correlated with other predictors, it contains little or no unique information, and there is redundancy in the set of predictors.
+
+####STEPS
+    1)Generate a constrained ordination with all available predictors.
+    2)Calculate the VIF of each variable.
+    3)If any variable has a VIF over a threshold (typically 10), drop the variable with the highest VIF
+    4)Repeat until all remaining variables have a VIF below the threshold.
+
+```{r}
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ irrgation + Organic_Matter + Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Iron + Magnesium + Manganese + Nickel + Phosphorus + Sulfur + Zinc , data = meta3, distance = "bray")
+m0_16s_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem)
+```
+```{r}
+vif.cca(m1_nifH_irr_cap_chem)
+```
+
+####Lots of high VIF scores, this might take a while, 
+
+####Droping Sulfur from the model 
+
+```{r}
+m1_nifH_irr_cap_chem_1<- capscale(abund_table_irr_nifH ~ irrgation + Organic_Matter + Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Iron + Magnesium + Manganese + Nickel + Phosphorus + Zinc , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_1)
+```
+
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_1)
+```
+####Dropping Phosporus from the model 
+
+```{r}
+m1_nifH_irr_cap_chem_2<- capscale(abund_table_irr_nifH ~ irrgation + Organic_Matter + Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Iron + Magnesium + Manganese + Nickel +Zinc , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_2)
+
+```
+
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_2)
+```
+####Dropping Organic Matter
+
+```{r}
+m1_nifH_irr_cap_chem_3<- capscale(abund_table_irr_nifH ~ irrgation + Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Iron + Magnesium + Manganese + Nickel +Zinc , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_3)
+```
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_3)
+```
+####Dropping Zinc
+
+```{r}
+m1_nifH_irr_cap_chem_4<- capscale(abund_table_irr_nifH ~ irrgation + Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Iron + Magnesium + Manganese + Nickel , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_4)
+```
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_4)
+```
+####Removing irragtion
+
+```{r}
+m1_nifH_irr_cap_chem_5<- capscale(abund_table_irr_nifH ~ Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Iron + Manganese + Nickel , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_5)
+```
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_5)
+```
+####Dropping iron
+```{r}
+m1_nifH_irr_cap_chem_6<- capscale(abund_table_irr_nifH ~ Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH + Barium + Calcium + Cobalt + Copper + Manganese + Nickel , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_6)
+```
+
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_6)
+```
+
+####Droping BArium
+```{r}
+m1_nifH_irr_cap_chem_7<- capscale(abund_table_irr_nifH ~ Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH +  Calcium + Cobalt + Copper + Manganese + Nickel , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_7)
+```
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_7)
+```
+####Droping Cobalt
+```{r}
+m1_nifH_irr_cap_chem_8<- capscale(abund_table_irr_nifH ~ Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Phosphorus + Av_Potassium +  pH +  Calcium + Copper + Manganese + Nickel , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_8)
+```
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_8)
+```
+####Droping Av_Phosphorus
+```{r}
+m1_nifH_irr_cap_chem_9<- capscale(abund_table_irr_nifH ~ Moisture_Content + Nitrate_Nitrite + Ammonia + Av_Potassium +  pH +  Calcium + Copper + Manganese + Nickel , data = meta3, distance = "bray")
+m1_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_9)
+```
+
+
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_9)
+```
+####Droping moisture
+```{r}
+m1_nifH_irr_cap_chem_10<- capscale(abund_table_irr_nifH ~ Nitrate_Nitrite + Ammonia + Av_Potassium +  pH +  Calcium + Copper + Manganese + Nickel , data = meta3, distance = "bray")
+m0_nifH_irr_cap_chem<- capscale(abund_table_irr_nifH ~ 1, meta3)
+plot(m1_nifH_irr_cap_chem_10)
+```
+
+
+```{r}
+vif.cca(m1_nifH_irr_cap_chem_10)
+```
+
+```{r results="hide"}
+model_cap_chem_nifH <-ordiR2step(m0_nifH_irr_cap_chem, scope=formula(m1_nifH_irr_cap_chem_10))
+```
+
+```{r}
+aov_model_cap_chem_nifH<-model_cap_chem_nifH$anova
+aov_model_cap_chem_nifH
+```
+```{r}
+capture.output(aov_model_cap_chem_nifH,file="aov_model_cap_chem_nifH_irr.txt")
+```
+
+
+####Our CAP Model explains 51% of the variance in our Bray-Curtis distances 
+```{r}
+stressplot(m1_nifH_irr_cap_chem_10)
+```
+```{r}
+screeplot(m1_nifH_irr_cap_chem_10)
+```
+```{r warning=FALSE}
+# CAP ordinate
+cap_ord_nifH_irr <- ordinate(
+    physeq = physeq_nifH_irr_ord, 
+    method = "CAP",
+    distance = abund_dist_nifH_irr,
+    formula = ~   Nitrate_Nitrite + Ammonia + Av_Potassium +  pH +  Calcium + Copper + Manganese + Nickel  )
+
+# CCA plot
+cap_plot_nifH_irr <- plot_ordination(
+  physeq = physeq_nifH_irr_ord, 
+  ordination = cap_ord_nifH_irr, 
+    color = "Site",
+    shape = "Plot",
+    axes = c(1,2)) + 
+    geom_point(aes(colour = Site), size = 3) + 
+    scale_color_manual(values =  farm_col_paired) 
+
+# Now add the environmental variables as arrows
+arrowmat_nifH_irr_cap <- vegan::scores(cap_ord_nifH_irr, display = "bp")
+
+#Get appropiate scalling multipler 
+mul<-vegan::ordiArrowMul(arrowmat_nifH_irr_cap)
+
+#Multiply biplot by scaling multiplier
+arrowmat_nifH_irr_cap_scale<-arrowmat_nifH_irr_cap*mul
+# Add labels, make a data.frame
+arrowdf_nifH_irr_cap <- data.frame(labels = rownames(arrowmat_nifH_irr_cap_scale), arrowmat_nifH_irr_cap_scale)
+
+# Define the arrow aesthetic mapping
+arrow_map <- aes(xend = CAP1, 
+    yend = CAP2, 
+    x = 0, 
+    y = 0, 
+    shape = NULL, 
+    color = NULL, 
+    label = labels)
+
+label_map <- aes(x = 1.3* CAP1, 
+    y = 1.3 * CAP2, 
+    shape = NULL, 
+    color = NULL, 
+    label = labels)
+
+arrowhead = arrow(length = unit(0.02, "npc"))
+
+# Make a new graphic
+cap_plot_nifH_irr + 
+  geom_segment(
+    mapping = arrow_map, 
+    size = .5, 
+    data = arrowdf_nifH_irr_cap, 
+    color = "gray", 
+    arrow = arrowhead
+  ) + 
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = arrowdf_nifH_irr_cap, 
+    show.legend = FALSE
+  )+
+  ggtitle("CAP plot constrained ordination of nifH  with selected Chemistry Model")+
+  theme_bw()
+
+
+```
+
+```{r echo=FALSE}
+tiff("nifH_irr_CAP_chem.tiff", width = 8, height = 5, units = 'in', res = 600)
+cap_plot_nifH_irr + 
+  geom_segment(
+    mapping = arrow_map, 
+    size = .5, 
+    data = arrowdf_nifH_irr_cap, 
+    color = "gray", 
+    arrow = arrowhead
+  ) + 
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = arrowdf_nifH_irr_cap, 
+    show.legend = FALSE
+  )+
+  ggtitle("CAP plot constrained ordination of nifH  with selected Chemistry Model")+
+  theme_bw()
+dev.off()
+```
+
+####Irrgation vs Site
+
+
+```{r}
+# CAP ordinate
+cap_ord_nifH_irr_site <- ordinate(
+    physeq = physeq_nifH_irr_ord, 
+    method = "CAP",
+    distance = abund_dist_nifH_irr,
+    formula = ~   irrgation + ARC  )
+
+# CCA plot
+cap_plot_nifH_irr_site <- plot_ordination(
+  physeq = physeq_nifH_irr_ord, 
+  ordination = cap_ord_nifH_irr_site, 
+    color = "Site",
+    shape = "Plot",
+    axes = c(1,2)) + 
+    geom_point(aes(colour = Site), size = 3) + 
+    scale_color_manual(values =  farm_col_paired) 
+
+# Now add the environmental variables as arrows
+arrowmat_nifH_irr_site_cap <- vegan::scores(cap_ord_nifH_irr_site, display = "bp")
+
+
+elipse_nifH_irr_site_cap <- vegan::scores(cap_ord_nifH_irr_site, display = "cn")
+
+#Get appropiate scalling multipler 
+mul<-vegan::ordiArrowMul(arrowmat_nifH_irr_site_cap)
+
+#Multiply biplot by scaling multiplier
+arrowmat_nifH_irr_site_cap_scale<-arrowmat_nifH_irr_site_cap*mul
+# Add labels, make a data.frame
+arrowdf_nifH_irr_site_cap <- data.frame(labels = rownames(arrowmat_nifH_irr_site_cap_scale), arrowmat_nifH_irr_site_cap_scale)
+
+#remove ARC variable
+arrowdf_nifH_irr_site_cap<-arrowdf_nifH_irr_site_cap[-2,]
+
+centdf_nifH_irr_site_cap <- data.frame(labels = rownames(elipse_nifH_irr_site_cap), elipse_nifH_irr_site_cap)
+
+
+# Define the arrow aesthetic mapping
+arrow_map <- aes(xend = CAP1, 
+    yend = CAP2, 
+    x = 0, 
+    y = 0, 
+    shape = NULL, 
+    color = NULL, 
+    label = labels)
+
+label_map <- aes(x = 1.3* CAP1, 
+    y = 1.3 * CAP2, 
+    shape = NULL, 
+    color = NULL, 
+    label = labels)
+
+arrowhead = arrow(length = unit(0.02, "npc"))
+
+# Make a new graphic
+cap_plot_nifH_irr_site + 
+  geom_segment(
+    mapping = arrow_map, 
+    size = .5, 
+    data = arrowdf_nifH_irr_site_cap, 
+    color = "gray", 
+    arrow = arrowhead
+  ) + 
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = arrowdf_nifH_irr_site_cap, 
+    show.legend = FALSE
+  )+
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = centdf_nifH_irr_site_cap, 
+    show.legend = FALSE
+  )+
+  
+  ggtitle("CAP plot constrained ordination of nifH  by irrigation and Site")+
+  theme_bw()
+
+
+```
+
+```{r echo=FALSE}
+tiff("nifH_irr_CAP_site.tiff", width = 8, height = 5, units = 'in', res = 600)
+cap_plot_nifH_irr_site + 
+  geom_segment(
+    mapping = arrow_map, 
+    size = .5, 
+    data = arrowdf_nifH_irr_site_cap, 
+    color = "gray", 
+    arrow = arrowhead
+  ) + 
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = arrowdf_nifH_irr_site_cap, 
+    show.legend = FALSE
+  )+
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = centdf_nifH_irr_site_cap, 
+    show.legend = FALSE
+  )+
+  
+  ggtitle("CAP plot constrained ordination of nifH  by irrigation and Site")+
+  theme_bw()
+dev.off()
+```
+
+
+#### Fitting species to cap plot 
+```{r}
+m1_nifH_irr_cap_chem_species<- capscale(abund_table_irr_nifH ~ Nitrate_Nitrite + Ammonia + Av_Potassium +  pH +  Calcium + Copper + Manganese + Nickel, data = meta3, distance = "bray")
+dims=c(1,2)
+site=scores(m1_nifH_irr_cap_chem_species,display="wa",choices=dims)
+cor.min=0.9 #below this threshold, arrows will be not plotted 
+#because orrelation is considered too much week
+cor_sp=as.data.frame(scores(m1_nifH_irr_cap_chem_species, dis="sp", scaling=1,choices=dims))
+cor_sp$cor=with(cor_sp,sqrt(CAP1^2+CAP2^2))
+cor_sp$sup=FALSE;cor_sp$sup[cor_sp$cor>=cor.min]<-TRUE
+cor_sp$labels=row.names(cor_sp)
+cor_sp=cor_sp[cor_sp$sup==TRUE,]
+cor_sp_s1=cor_sp
+
+
+
+```
+
+
+```{r}
+
+tax_nifH_cap<-tax_nifH
+#use perl scirpt to remove teh g_
+tax_nifH_cap$species<- sub(".*_", "", tax_nifH_cap$species)
+#use the function captilize to captilize first letter
+tax_nifH_cap$species<- capitalize(tax_nifH_cap$species)
+
+species_nifH_irr_cap<-merge(cor_sp_s1, tax_nifH_cap, by="row.names")
+
+
+```
+
+
+Replot with species 
+```{r warning=FALSE}
+# CAP ordinate
+cap_ord_nifH_irr <- ordinate(
+    physeq = physeq_nifH_irr_ord, 
+    method = "CAP",
+    distance = abund_dist_nifH_irr,
+    formula = ~   Nitrate_Nitrite + Ammonia + Av_Potassium +  pH +  Calcium + Copper + Manganese + Nickel  )
+
+# CCA plot
+cap_plot_nifH_irr <- plot_ordination(
+  physeq = physeq_nifH_irr_ord, 
+  ordination = cap_ord_nifH_irr, 
+    color = "Site",
+    shape = "Plot",
+    axes = c(1,2)) + 
+    geom_point(aes(colour = Site), size = 3) + 
+    scale_color_manual(values =  farm_col_paired) 
+
+
+
+# Define the arrow aesthetic mapping
+arrow_map <- aes(xend = CAP1, 
+    yend = CAP2, 
+    x = 0, 
+    y = 0, 
+    shape = NULL, 
+    color = NULL,
+    label = species)
+
+label_map <- aes(x = 1.3* CAP1, 
+    y = 1.3 * CAP2, 
+    shape = NULL, 
+    color = NULL, 
+    label = species)
+
+arrowhead = arrow(length = unit(0.02, "npc"))
+
+# Make a new graphic
+cap_plot_nifH_irr + 
+  geom_segment(
+    mapping = arrow_map, 
+    size = .5, 
+    data = species_nifH_irr_cap, 
+    color = "gray", 
+    arrow = arrowhead
+  ) + 
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = species_nifH_irr_cap, 
+    show.legend = FALSE,
+    fontface="italic"
+  )+
+  ggtitle("CAP plot constrained ordination of nifH with Correlated Species")+
+  theme_bw()
+```
+
+
+```{r echo=FALSE}
+tiff("nifH_irr_CAP_species.tiff", width = 8, height = 5, units = 'in', res = 600)
+cap_plot_nifH_irr + 
+  geom_segment(
+    mapping = arrow_map, 
+    size = .5, 
+    data = species_nifH_irr_cap, 
+    color = "gray", 
+    arrow = arrowhead
+  ) + 
+  geom_text_repel(
+    mapping = label_map, 
+    size = 4,  
+    data = species_nifH_irr_cap, 
+    show.legend = FALSE,
+    fontface="italic"
+  )+
+  ggtitle("CAP plot constrained ordination of nifH with Correlated Species")+
+  theme_bw()
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
